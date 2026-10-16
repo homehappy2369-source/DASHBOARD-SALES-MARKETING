@@ -239,7 +239,7 @@
     const {data:{session},error}=await client.auth.getSession();if(error)throw error;
     supabaseClient=client;
     localStorage.setItem(CONFIG_KEY,JSON.stringify({url,key}));$("supabaseStatus").textContent="Terhubung";$("connectionLabel").textContent="Supabase siap";$("connectionDetail").textContent=session?"Sesi login aktif":"Login diperlukan";
-    toast("Koneksi Supabase tersimpan. Login online belum diaktifkan untuk sinkronisasi data.");return client;
+    toast("Koneksi Supabase tersimpan. Silakan login online untuk memuat data.");return client;
   }
   function bindEvents(){
     document.querySelectorAll(".nav-item[data-page]").forEach(b=>b.addEventListener("click",()=>showPage(b.dataset.page)));
