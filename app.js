@@ -145,7 +145,60 @@
     $("revenueTableBody").innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.date)}</td><td>${fmtRp(r.store1)}</td><td>${fmtRp(r.store2)}</td><td><strong>${fmtRp((+r.store1||0)+(+r.store2||0))}</strong></td><td>${esc(r.notes||"—")}</td><td><div class="row-actions"><button data-edit-revenue="${esc(r.id)}">Edit</button><button class="delete" data-delete-revenue="${esc(r.id)}">Hapus</button></div></td></tr>`).join(""):'<tr><td colspan="6" class="empty-cell">Belum ada catatan omzet pada periode ini.</td></tr>';
   }
   function renderAll(){renderDashboard();renderBcg();renderChat();renderRevenue();}
-  function upsert(key,item){const i=state[key].findIndex(r=>r.id===item.id);if(i>=0)state[key][i]=item;else state[key].push(item);saveLocal();renderAll();}
+  const remoteTable = {revenue:"hh_revenue",chats:"hh_chats",bcg:"hh_bcg_items"};
+  function toRemoteRow(key,r){
+    if(key==="revenue")return {id:r.id,work_date:r.date,store1:Number(r.store1)||0,store2:Number(r.store2)||0,notes:r.notes||""};
+    if(key==="chats")return {id:r.id,work_date:r.date,chat_count:Number(r.count)||0,channel:r.channel||"Lainnya",notes:r.notes||""};
+    return {id:r.id,period:r.period,product_code:r.code||"",product_name:r.name||"",sales:Number(r.sales)||0,previous_sales:Number(r.previous)||0,margin:r.margin==null?null:Number(r.margin)};
+  }
+  function fromRemoteRows(revenue,chats,bcg){
+    return {
+      revenue:(revenue||[]).map(r=>({id:r.id,date:r.work_date,store1:Number(r.store1)||0,store2:Number(r.store2)||0,notes:r.notes||""})),
+      chats:(chats||[]).map(r=>({id:r.id,date:r.work_date,count:Number(r.chat_count)||0,channel:r.channel||"Lainnya",notes:r.notes||""})),
+      bcg:(bcg||[]).map(r=>({id:r.id,period:r.period,code:r.product_code||"",name:r.product_name||"",sales:Number(r.sales)||0,previous:Number(r.previous_sales)||0,margin:r.margin==null?null:Number(r.margin)}))
+    };
+  }
+  async function loadOnlineData(){
+    if(!supabaseClient)throw new Error("Koneksi Supabase belum siap.");
+    const {data:allowed,error:allowError}=await supabaseClient.rpc("hh_is_allowed_user");
+    if(allowError)throw allowError;
+    if(!allowed)throw new Error("Akun ini belum diizinkan mengakses dashboard. Pastikan UUID akun sudah ditambahkan ke tabel allowed_users.");
+    const [rev,chats,bcg]=await Promise.all([
+      supabaseClient.from("hh_revenue").select("id,work_date,store1,store2,notes").order("work_date",{ascending:false}),
+      supabaseClient.from("hh_chats").select("id,work_date,chat_count,channel,notes").order("work_date",{ascending:false}),
+      supabaseClient.from("hh_bcg_items").select("id,period,product_code,product_name,sales,previous_sales,margin").order("period",{ascending:false})
+    ]);
+    const err=[rev.error,chats.error,bcg.error].find(Boolean);if(err)throw err;
+    state=fromRemoteRows(rev.data,chats.data,bcg.data);saveLocal();renderAll();
+  }
+  async function saveRemoteRow(key,item){
+    if(demoMode||!supabaseClient)return;
+    const {error}=await supabaseClient.from(remoteTable[key]).upsert(toRemoteRow(key,item));
+    if(error)throw error;
+  }
+  async function deleteRemoteRow(key,id){
+    if(demoMode||!supabaseClient)return;
+    const {error}=await supabaseClient.from(remoteTable[key]).delete().eq("id",id);
+    if(error)throw error;
+  }
+  async function replaceBcgMonth(month,imported){
+    const oldRows=state.bcg.filter(r=>r.period===month);
+    if(!demoMode&&supabaseClient){
+      if(imported.length){
+        const {error}=await supabaseClient.from("hh_bcg_items").upsert(imported.map(r=>toRemoteRow("bcg",r)));
+        if(error)throw error;
+      }
+      const oldIds=oldRows.filter(r=>!imported.some(n=>n.id===r.id)).map(r=>r.id);
+      if(oldIds.length){const {error}=await supabaseClient.from("hh_bcg_items").delete().in("id",oldIds);if(error)throw error;}
+    }
+    state.bcg=state.bcg.filter(r=>r.period!==month).concat(imported);saveLocal();renderAll();
+  }
+  async function upsert(key,item){
+    const previous=state[key].find(r=>r.id===item.id);const index=state[key].findIndex(r=>r.id===item.id);
+    if(index>=0)state[key][index]=item;else state[key].push(item);
+    try{await saveRemoteRow(key,item);saveLocal();renderAll();}
+    catch(err){if(index>=0)state[key][index]=previous;else state[key]=state[key].filter(r=>r.id!==item.id);renderAll();toast("Gagal menyimpan ke Supabase: "+err.message);throw err;}
+  }
   function exportCsv(filename,rows){if(!rows.length){toast("Tidak ada data untuk diekspor.");return;}const csv=rows.map(row=>row.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\r\n");const blob=new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8;"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);toast("File ekspor disiapkan.");}
   function exportBcg(){
     const rows=bcgForMonth($("bcgPeriod").value||monthNow);if(!rows.length){toast("Belum ada data BCG untuk diekspor.");return;}
@@ -170,7 +223,7 @@
       const parseNum=v=>Number(String(v??0).replace(/[^\d,.-]/g,"").replace(/\.(?=\d{3}(\D|$))/g,"").replace(",", "."))||0;
       rows.slice(1).forEach((row,i)=>{const name=String(row[nameI]||"").trim();if(!name)return;const sales=parseNum(row[salesI>=0?salesI:qtyI]);const prev=prevI>=0?parseNum(row[prevI]):0;imported.push({id:uid(),period:month,code:codeI>=0?String(row[codeI]||"").trim():`IMP-${i+1}`,name,sales,previous:prev,margin:marginI>=0?parseNum(row[marginI]):null});});
       if(!imported.length)throw new Error("Tidak ada baris barang yang dapat dibaca.");
-      state.bcg=state.bcg.filter(r=>r.period!==month).concat(imported);saveLocal();renderAll();toast(`${imported.length} barang berhasil dianalisis untuk ${monthLabel(month)}.`);
+      await replaceBcgMonth(month,imported);toast(`${imported.length} barang berhasil dianalisis untuk ${monthLabel(month)}.`);
     }catch(err){toast(err.message||"Gagal membaca file.");}
   }
   function setEditChat(id){const r=state.chats.find(x=>x.id===id);if(!r)return;$("chatEditId").value=r.id;$("chatDate").value=r.date;$("chatCount").value=r.count;$("chatChannel").value=r.channel||"Semua kanal";$("chatNotes").value=r.notes||"";$("saveChatButton").textContent="Simpan perubahan";$("cancelChatEdit").classList.remove("hidden");window.scrollTo({top:0,behavior:"smooth"});}
@@ -196,7 +249,13 @@
     $("loginForm").addEventListener("submit",async e=>{
       e.preventDefault();const cfg=getConfig();if(!supabaseClient&&cfg.url&&cfg.key){try{await connectSupabase(cfg.url,cfg.key);}catch(err){$("authNotice").className="notice error";$("authNotice").textContent=err.message;return;}}
       if(!supabaseClient){$("authNotice").className="notice warning";$("authNotice").textContent="Koneksi Supabase belum dikonfigurasi. Buka mode demo untuk mencoba, atau isi koneksi di Pengaturan.";return;}
-      try{const {data,error}=await supabaseClient.auth.signInWithPassword({email:$("loginEmail").value,password:$("loginPassword").value});if(error)throw error;if(!data.user)throw new Error("Login tidak berhasil.");demoMode=false;$("authScreen").classList.add("hidden");$("appShell").classList.remove("hidden");$("demoBanner").classList.add("hidden");$("connectionLabel").textContent="Login online";$("connectionDetail").textContent=data.user.email;toast("Login berhasil. Sinkronisasi modul belum dikonfigurasi.");}catch(err){$("authNotice").className="notice error";$("authNotice").textContent="Login gagal: "+err.message;}
+      try{
+        const {data,error}=await supabaseClient.auth.signInWithPassword({email:$("loginEmail").value.trim(),password:$("loginPassword").value});
+        if(error)throw error;if(!data.user)throw new Error("Login tidak berhasil.");
+        demoMode=false;
+        try{await loadOnlineData();}catch(syncErr){await supabaseClient.auth.signOut();demoMode=true;throw new Error("Login berhasil, tetapi akses database gagal. Periksa UUID akun di tabel allowed_users, RLS, dan nama tabel. Detail: "+syncErr.message);}
+        $("authScreen").classList.add("hidden");$("appShell").classList.remove("hidden");$("demoBanner").classList.add("hidden");$("connectionLabel").textContent="Login online";$("connectionDetail").textContent=data.user.email;renderAll();toast("Login online berhasil. Data dimuat dari Supabase.");
+      }catch(err){$("authNotice").className="notice error";$("authNotice").textContent="Login/sinkronisasi gagal: "+err.message;}
     });
     $("recoveryForm").addEventListener("submit",async e=>{
       e.preventDefault();const password=$("recoveryPassword").value,confirmation=$("recoveryPasswordConfirm").value;
@@ -218,17 +277,17 @@
       if(demoMode||!supabaseClient){toast("Login dengan akun Supabase terlebih dahulu. Mode demo tidak memiliki kata sandi.");return;}
       try{const {data:{user},error:sessionError}=await supabaseClient.auth.getUser();if(sessionError)throw sessionError;if(!user)throw new Error("Sesi login tidak ditemukan.");const {error}=await supabaseClient.auth.updateUser({password});if(error)throw error;$("changePasswordForm").reset();toast("Kata sandi berhasil diubah.");}catch(err){toast("Gagal mengubah kata sandi: "+err.message);}
     });
-    $("logoutButton").addEventListener("click",async()=>{if(supabaseClient&&!demoMode){await supabaseClient.auth.signOut();}showAuth();});
+    $("logoutButton").addEventListener("click",async()=>{if(supabaseClient&&!demoMode){await supabaseClient.auth.signOut();}demoMode=true;showAuth();toast("Kamu sudah keluar dari akun online.");});
     $("dashboardMonth").addEventListener("change",renderDashboard);
     $("bcgPeriod").addEventListener("change",renderBcg);$("bcgSearch").addEventListener("input",renderBcg);document.querySelectorAll("[data-bcg-category]").forEach(b=>b.addEventListener("click",()=>{selectedBcgCategory=selectedBcgCategory===b.dataset.bcgCategory?null:b.dataset.bcgCategory;renderBcg();}));
-    $("sampleBcgButton").addEventListener("click",()=>{const m=$("bcgPeriod").value||monthNow;const demo=seedData().bcg.map(r=>({...r,period:m}));state.bcg=state.bcg.filter(r=>r.period!==m).concat(demo);saveLocal();renderAll();toast("Data contoh BCG dimuat.");});
+    $("sampleBcgButton").addEventListener("click",async()=>{const m=$("bcgPeriod").value||monthNow;const demo=seedData().bcg.map(r=>({...r,id:uid(),period:m}));try{await replaceBcgMonth(m,demo);toast("Data contoh BCG dimuat.");}catch(err){toast("Gagal menyimpan data BCG: "+err.message);}});
     $("importBcgButton").addEventListener("click",importBcg);$("exportBcgButton").addEventListener("click",exportBcg);
-    $("chatForm").addEventListener("submit",e=>{e.preventDefault();const date=$("chatDate").value;const id=$("chatEditId").value||uid();upsert("chats",{id,date,count:Number($("chatCount").value),channel:$("chatChannel").value,notes:$("chatNotes").value.trim()});resetChatForm();$("chatMonth").value=date.slice(0,7)||monthNow;renderAll();toast("Catatan chat disimpan.");});
-    $("revenueForm").addEventListener("submit",e=>{e.preventDefault();const id=$("revenueEditId").value||uid();upsert("revenue",{id,date:$("revenueDate").value,store1:Number($("store1Amount").value),store2:Number($("store2Amount").value),notes:$("revenueNotes").value.trim()});resetRevenueForm();toast("Catatan omzet disimpan.");});
+    $("chatForm").addEventListener("submit",async e=>{e.preventDefault();const date=$("chatDate").value;const id=$("chatEditId").value||uid();try{await upsert("chats",{id,date,count:Number($("chatCount").value),channel:$("chatChannel").value,notes:$("chatNotes").value.trim()});resetChatForm();$("chatMonth").value=date.slice(0,7)||monthNow;renderAll();toast("Catatan chat disimpan.");}catch(e){}});
+    $("revenueForm").addEventListener("submit",async e=>{e.preventDefault();const id=$("revenueEditId").value||uid();try{await upsert("revenue",{id,date:$("revenueDate").value,store1:Number($("store1Amount").value),store2:Number($("store2Amount").value),notes:$("revenueNotes").value.trim()});resetRevenueForm();toast("Catatan omzet disimpan.");}catch(e){}});
     $("cancelChatEdit").addEventListener("click",resetChatForm);$("cancelRevenueEdit").addEventListener("click",resetRevenueForm);
     $("chatMonth").addEventListener("change",()=>{showAllChatHistory=false;renderChat();});$("toggleChatHistory").addEventListener("click",()=>{showAllChatHistory=!showAllChatHistory;renderChat();});$("revenueMonth").addEventListener("change",renderRevenue);
-    $("chatTableBody").addEventListener("click",e=>{const edit=e.target.closest("[data-edit-chat]"),del=e.target.closest("[data-delete-chat]");if(edit)setEditChat(edit.dataset.editChat);if(del&&confirm("Hapus catatan chat ini?")){state.chats=state.chats.filter(r=>r.id!==del.dataset.deleteChat);saveLocal();renderAll();toast("Catatan dihapus.");}});
-    $("revenueTableBody").addEventListener("click",e=>{const edit=e.target.closest("[data-edit-revenue]"),del=e.target.closest("[data-delete-revenue]");if(edit)setEditRevenue(edit.dataset.editRevenue);if(del&&confirm("Hapus catatan omzet ini?")){state.revenue=state.revenue.filter(r=>r.id!==del.dataset.deleteRevenue);saveLocal();renderAll();toast("Catatan dihapus.");}});
+    $("chatTableBody").addEventListener("click",async e=>{const edit=e.target.closest("[data-edit-chat]"),del=e.target.closest("[data-delete-chat]");if(edit)setEditChat(edit.dataset.editChat);if(del&&confirm("Hapus catatan chat ini?")){try{await deleteRemoteRow("chats",del.dataset.deleteChat);state.chats=state.chats.filter(r=>r.id!==del.dataset.deleteChat);saveLocal();renderAll();toast("Catatan dihapus.");}catch(err){toast("Gagal menghapus dari Supabase: "+err.message);}}});
+    $("revenueTableBody").addEventListener("click",async e=>{const edit=e.target.closest("[data-edit-revenue]"),del=e.target.closest("[data-delete-revenue]");if(edit)setEditRevenue(edit.dataset.editRevenue);if(del&&confirm("Hapus catatan omzet ini?")){try{await deleteRemoteRow("revenue",del.dataset.deleteRevenue);state.revenue=state.revenue.filter(r=>r.id!==del.dataset.deleteRevenue);saveLocal();renderAll();toast("Catatan dihapus.");}catch(err){toast("Gagal menghapus dari Supabase: "+err.message);}}});
     $("exportChatButton").addEventListener("click",()=>{const rows=effectiveChats(monthRows(state.chats,$("chatMonth").value||monthNow));exportCsv("chat-happy-home.csv",[["Tanggal","Jumlah Chat","Kanal","Catatan"],...rows.map(r=>[r.date,r.count,r.channel,r.notes])]);});
     $("exportRevenueButton").addEventListener("click",()=>{const rows=monthRows(state.revenue,$("revenueMonth").value||monthNow);exportCsv("omzet-happy-home.csv",[["Tanggal","Omzet Toko 1","Omzet Toko 2","Total","Catatan"],...rows.map(r=>[r.date,r.store1,r.store2,(+r.store1||0)+(+r.store2||0),r.notes])]);});
     $("supabaseForm").addEventListener("submit",async e=>{e.preventDefault();try{await connectSupabase($("supabaseUrl").value.trim(),$("supabaseKey").value.trim());$("supabaseStatus").textContent="Tersimpan";}catch(err){$("supabaseStatus").textContent="Gagal";toast(err.message);}});
