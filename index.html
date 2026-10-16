@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#35205c">
+  <title>Happy Home | Sales & Marketing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div id="authScreen" class="auth-screen">
+    <div class="auth-card">
+      <div class="brand-logo-wrap"><img class="brand-logo" src="logo.png" alt="Logo Happy Home" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><div class="brand-mark logo-fallback">HH</div></div>
+      <p class="eyebrow">HAPPY HOME · INTERNAL WORKSPACE</p>
+      <h1>Sales & Marketing</h1>
+      <p class="muted">Dashboard kinerja untuk kepala divisi.</p>
+      <div id="authNotice" class="notice info">Masuk menggunakan akun Supabase milikmu. Untuk mencoba tampilan sekarang, gunakan mode demo.</div>
+      <form id="loginForm" class="login-form">
+        <label>Email akun<input id="loginEmail" type="email" placeholder="email@perusahaan.com" autocomplete="username" required></label>
+        <label>Kata sandi<input id="loginPassword" type="password" placeholder="Kata sandi" autocomplete="current-password" required></label>
+        <button class="btn primary full" type="submit">Masuk ke dashboard</button>
+        <button id="forgotPasswordButton" class="text-button forgot-button" type="button">Lupa kata sandi?</button>
+      </form>
+      <div id="recoveryPanel" class="recovery-panel hidden"><h3>Buat kata sandi baru</h3><form id="recoveryForm" class="login-form"><label>Kata sandi baru<input id="recoveryPassword" type="password" minlength="8" autocomplete="new-password" required></label><label>Ulangi kata sandi<input id="recoveryPasswordConfirm" type="password" minlength="8" autocomplete="new-password" required></label><button class="btn primary full" type="submit">Simpan kata sandi baru</button></form></div>
+      <button id="demoButton" class="btn secondary full">Coba mode demo</button>
+      <p class="tiny muted">Mode demo menyimpan data contoh di browser perangkat ini saja. Mode demo bukan sistem login aman dan tidak menyinkronkan data online.</p>
+      <div id="configHint" class="config-hint"></div>
+    </div>
+  </div>
+
+  <div id="appShell" class="app-shell hidden">
+    <aside class="sidebar" id="sidebar">
+      <div class="side-brand"><div class="side-logo-wrap"><img class="side-logo" src="logo.png" alt="Logo Happy Home" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><div class="brand-mark small logo-fallback">HH</div></div><div><strong>HAPPY HOME</strong><span>Sales & Marketing</span></div></div>
+      <div class="workspace-label">WORKSPACE</div>
+      <nav id="mainNav">
+        <button class="nav-item active" data-page="dashboard"><span>▦</span>Dashboard</button>
+        <button class="nav-item" data-page="bcg"><span>◈</span>BCG Barang</button>
+        <button class="nav-item" data-page="chat"><span>◉</span>Track Chat</button>
+        <button class="nav-item" data-page="omzet"><span>↗</span>Track Omzet</button>
+        <button class="nav-item" data-page="settings"><span>⚙</span>Pengaturan</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="secure-card"><span class="secure-dot"></span><div><strong id="connectionLabel">Mode demo</strong><small id="connectionDetail">Data lokal perangkat ini</small></div></div>
+        <button id="logoutButton" class="nav-item logout"><span>↪</span>Keluar</button>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <button id="mobileMenu" class="icon-button" aria-label="Buka menu">☰</button>
+        <div><p class="eyebrow" id="pageEyebrow">OVERVIEW</p><h2 id="pageTitle">Dashboard</h2></div>
+        <div class="topbar-right"><span class="date-pill" id="todayLabel"></span><div class="avatar"><img src="logo.png" alt="Logo Happy Home" onerror="this.style.display='none';this.parentElement.textContent='HH'"></div></div>
+      </header>
+      <div id="demoBanner" class="demo-banner"><strong>Mode demo aktif.</strong> Data yang kamu masukkan tersimpan di browser ini, bukan di Supabase. Hubungkan Supabase melalui menu Pengaturan untuk penggunaan online.</div>
+
+      <section id="page-dashboard" class="page active">
+        <div class="welcome-row"><div><h3>Ringkasan performa</h3><p>Pantau omzet, aktivitas chat, dan komposisi produk Happy Home.</p></div><div class="month-select"><label for="dashboardMonth">Periode</label><input id="dashboardMonth" type="month"></div></div>
+        <div class="kpi-grid">
+          <article class="kpi-card"><div class="kpi-head"><span>Total omzet</span><span class="kpi-icon purple">↗</span></div><strong id="kpiOmzet">Rp0</strong><small id="kpiOmzetMeta">Toko 1 + Toko 2</small></article>
+          <article class="kpi-card"><div class="kpi-head"><span>Chat masuk</span><span class="kpi-icon pink">◉</span></div><strong id="kpiChat">0</strong><small id="kpiChatMeta">Total periode terpilih</small></article>
+          <article class="kpi-card"><div class="kpi-head"><span>Hari tercatat</span><span class="kpi-icon yellow">▦</span></div><strong id="kpiDays">0</strong><small>Catatan omzet dalam periode</small></article>
+          <article class="kpi-card"><div class="kpi-head"><span>Barang dianalisis</span><span class="kpi-icon blue">◈</span></div><strong id="kpiProducts">0</strong><small id="kpiProductsMeta">Hasil BCG periode terpilih</small></article>
+        </div>
+        <div class="channel-summary-wrap">
+          <div class="section-mini-heading"><h3>Chat masuk per kanal</h3><span id="dashboardChannelPeriod"></span></div>
+          <div id="dashboardChannelSummary" class="channel-summary"></div>
+        </div>
+        <div class="content-grid">
+          <article class="panel chart-panel"><div class="panel-heading"><div><h3>Tren omzet</h3><p>Perbandingan omzet harian dua toko</p></div><span class="legend"><i class="legend-one"></i>Toko 1 <i class="legend-two"></i>Toko 2</span></div><div class="chart-wrap"><canvas id="revenueChart"></canvas></div></article>
+          <article class="panel chart-panel"><div class="panel-heading"><div><h3>Komposisi BCG</h3><p>Jumlah barang per kategori</p></div></div><div class="chart-wrap doughnut-wrap"><canvas id="bcgChart"></canvas></div><div id="bcgLegend" class="bcg-legend"></div></article>
+        </div>
+        <div class="content-grid lower-grid">
+          <article class="panel"><div class="panel-heading"><div><h3>Aktivitas chat</h3><p>Chat masuk per hari pada periode ini</p></div><button class="text-button" data-goto="chat">Buka track chat →</button></div><div class="chart-wrap short"><canvas id="chatChart"></canvas></div></article>
+          <article class="panel"><div class="panel-heading"><div><h3>Catatan terbaru</h3><p>Input omzet paling baru</p></div><button class="text-button" data-goto="omzet">Lihat semua →</button></div><div id="recentRecords" class="recent-list"></div></article>
+        </div>
+      </section>
+
+      <section id="page-bcg" class="page">
+        <div class="page-intro"><div><h3>Analisis BCG Barang</h3><p>Impor Excel atau mulai dengan data contoh. Setiap hasil disimpan per periode.</p></div><button id="sampleBcgButton" class="btn secondary">Muat data contoh</button></div>
+        <div class="panel import-panel"><div class="upload-icon">⇧</div><div class="upload-copy"><h3>Impor rekap penjualan Excel</h3><p>Pilih file .xlsx atau .csv. Kolom ideal: kode barang, nama barang, penjualan periode ini, penjualan periode sebelumnya, dan margin (opsional).</p><div class="file-row"><input id="bcgFile" type="file" accept=".xlsx,.xls,.csv"><button id="importBcgButton" class="btn primary">Impor dan analisis</button></div><small class="muted">File diproses di browser. Mode demo tidak mengunggah file ke server.</small></div></div>
+        <div class="filter-row"><div><label for="bcgPeriod">Periode analisis</label><input id="bcgPeriod" type="month"></div><div class="filter-grow"><label for="bcgSearch">Cari barang</label><input id="bcgSearch" type="search" placeholder="Cari kode atau nama barang..."></div><button id="exportBcgButton" class="btn secondary align-end">Ekspor Excel</button></div>
+        <div class="bcg-cards">
+          <button type="button" class="bcg-mini star-card" data-bcg-category="Star" aria-pressed="false"><span>STAR</span><strong id="countStar">0</strong><small>Pertumbuhan & kontribusi tinggi</small></button>
+          <button type="button" class="bcg-mini cow-card" data-bcg-category="Cash Cow" aria-pressed="false"><span>CASH COW</span><strong id="countCow">0</strong><small>Kontribusi tinggi, pertumbuhan rendah</small></button>
+          <button type="button" class="bcg-mini question-card" data-bcg-category="Question Mark" aria-pressed="false"><span>QUESTION MARK</span><strong id="countQuestion">0</strong><small>Kontribusi rendah, pertumbuhan tinggi</small></button>
+          <button type="button" class="bcg-mini dog-card" data-bcg-category="Dog" aria-pressed="false"><span>DOG</span><strong id="countDog">0</strong><small>Kontribusi & pertumbuhan rendah</small></button>
+        </div>
+        <div class="panel table-panel"><div class="panel-heading"><div><h3 id="bcgTableTitle">Pilih kategori BCG</h3><p id="bcgTableMeta">Pilih salah satu kartu di atas untuk melihat daftar barang</p></div><span class="table-note">Model internal berdasarkan kontribusi & pertumbuhan penjualan</span></div><div class="table-scroll"><table><thead><tr><th>Kode</th><th>Nama barang</th><th>Penjualan</th><th>Pertumbuhan</th><th>Kontribusi</th><th>Kategori</th></tr></thead><tbody id="bcgTableBody"></tbody></table></div></div>
+        <div class="notice warning">Catatan: ini adalah klasifikasi portofolio internal, bukan BCG klasik berbasis pangsa pasar relatif dan pertumbuhan pasar. Untuk hasil yang lebih akurat, gunakan data beberapa periode yang sebanding.</div>
+      </section>
+
+      <section id="page-chat" class="page">
+        <div class="page-intro"><div><h3>Track Chat Masuk</h3><p>Catat jumlah chat pelanggan setiap hari dan pantau trennya.</p></div></div>
+        <div class="content-grid form-grid">
+          <article class="panel"><div class="panel-heading"><div><h3>Input chat harian</h3><p>Gunakan total chat masuk yang kamu catat.</p></div></div><form id="chatForm" class="data-form"><input type="hidden" id="chatEditId"><label>Tanggal<input id="chatDate" type="date" required></label><label>Jumlah chat masuk<input id="chatCount" type="number" min="0" step="1" required placeholder="Contoh: 45"></label><label>Kanal (opsional)<select id="chatChannel"><option>WhatsApp</option><option>Instagram</option><option>TikTok</option><option>Website</option><option>Lainnya</option></select></label><label>Catatan<textarea id="chatNotes" rows="3" placeholder="Contoh: banyak pertanyaan promo"></textarea></label><div class="form-actions"><button class="btn primary" type="submit" id="saveChatButton">Simpan catatan</button><button class="btn ghost hidden" type="button" id="cancelChatEdit">Batal edit</button></div></form></article>
+          <article class="panel"><div class="panel-heading"><div><h3>Ringkasan chat</h3><p>Filter menurut bulan.</p></div><input id="chatMonth" type="month" class="compact-input"></div><div class="summary-number"><strong id="chatMonthTotal">0</strong><span>chat masuk bulan ini (total semua kanal)</span></div><div id="chatPageChannelSummary" class="channel-summary compact-channel-summary"></div><div class="chart-wrap short"><canvas id="chatPageChart"></canvas></div></article>
+        </div>
+        <div class="panel table-panel"><div class="panel-heading"><div><h3>Riwayat chat</h3><p id="chatHistoryMeta">Menampilkan catatan terbaru.</p></div><div class="history-actions"><button id="toggleChatHistory" class="btn ghost" type="button">Tampilkan semua</button><button id="exportChatButton" class="btn secondary">Ekspor CSV</button></div></div><div class="table-scroll"><table><thead><tr><th>Tanggal</th><th>Jumlah</th><th>Kanal</th><th>Catatan</th><th>Aksi</th></tr></thead><tbody id="chatTableBody"></tbody></table></div></div>
+      </section>
+
+      <section id="page-omzet" class="page">
+        <div class="page-intro"><div><h3>Track Omzet Toko</h3><p>Catat omzet kedua toko setiap hari dan bandingkan hasilnya.</p></div></div>
+        <div class="content-grid form-grid">
+          <article class="panel"><div class="panel-heading"><div><h3>Input omzet harian</h3><p>Masukkan angka rupiah tanpa titik atau simbol.</p></div></div><form id="revenueForm" class="data-form"><input type="hidden" id="revenueEditId"><label>Tanggal<input id="revenueDate" type="date" required></label><label>Omzet Toko 1 (Rp)<input id="store1Amount" type="number" min="0" step="1" required placeholder="Contoh: 12500000"></label><label>Omzet Toko 2 (Rp)<input id="store2Amount" type="number" min="0" step="1" required placeholder="Contoh: 9800000"></label><label>Catatan (opsional)<textarea id="revenueNotes" rows="3" placeholder="Catatan target atau kejadian khusus"></textarea></label><div class="form-actions"><button class="btn primary" type="submit" id="saveRevenueButton">Simpan omzet</button><button class="btn ghost hidden" type="button" id="cancelRevenueEdit">Batal edit</button></div></form></article>
+          <article class="panel"><div class="panel-heading"><div><h3>Ringkasan omzet</h3><p>Filter menurut bulan.</p></div><input id="revenueMonth" type="month" class="compact-input"></div><div class="store-summary"><div><span>Toko 1</span><strong id="store1Total">Rp0</strong></div><div><span>Toko 2</span><strong id="store2Total">Rp0</strong></div><div class="total"><span>Total gabungan</span><strong id="storeCombinedTotal">Rp0</strong></div></div><div class="chart-wrap short"><canvas id="revenuePageChart"></canvas></div></article>
+        </div>
+        <div class="panel table-panel"><div class="panel-heading"><div><h3>Riwayat omzet</h3><p>Gunakan filter bulan untuk melihat catatan.</p></div><button id="exportRevenueButton" class="btn secondary">Ekspor CSV</button></div><div class="table-scroll"><table><thead><tr><th>Tanggal</th><th>Toko 1</th><th>Toko 2</th><th>Total</th><th>Catatan</th><th>Aksi</th></tr></thead><tbody id="revenueTableBody"></tbody></table></div></div>
+      </section>
+
+      <section id="page-settings" class="page">
+        <div class="page-intro"><div><h3>Pengaturan</h3><p>Konfigurasi koneksi database dan pengelolaan data.</p></div></div>
+        <div class="content-grid settings-grid">
+          <article class="panel"><div class="panel-heading"><div><h3>Koneksi Supabase</h3><p>Isi kredensial proyek baru milik Happy Home.</p></div><span class="status-chip" id="supabaseStatus">Belum terhubung</span></div><div class="notice warning">Jangan masukkan service_role key di aplikasi browser. Gunakan Project URL dan publishable/anon key saja, lalu aktifkan RLS pada seluruh tabel.</div><form id="supabaseForm" class="data-form"><label>Supabase Project URL<input id="supabaseUrl" type="url" placeholder="https://project-id.supabase.co" autocomplete="off"></label><label>Publishable key / anon key<input id="supabaseKey" type="password" placeholder="sb_publishable_... atau anon key" autocomplete="off"></label><div class="form-actions"><button type="submit" class="btn primary">Simpan dan hubungkan</button><button id="disconnectSupabase" type="button" class="btn secondary">Putuskan</button></div></form><p class="tiny muted">Konfigurasi disimpan di browser ini. Untuk deploy, isi nilai yang sama pada app.js atau konfigurasi environment saat proses build. Data baru benar-benar online setelah tabel dan kebijakan RLS disiapkan.</p></article>
+          <article class="panel"><div class="panel-heading"><div><h3>Keamanan akun</h3><p>Ubah kata sandi akun yang sedang login.</p></div></div><form id="changePasswordForm" class="data-form"><label>Kata sandi baru<input id="newPassword" type="password" minlength="8" autocomplete="new-password" placeholder="Minimal 8 karakter" required></label><label>Ulangi kata sandi baru<input id="confirmNewPassword" type="password" minlength="8" autocomplete="new-password" placeholder="Ketik ulang kata sandi" required></label><div class="form-actions"><button type="submit" class="btn primary">Ubah kata sandi</button></div></form><p class="tiny muted">Fitur ini memerlukan login Supabase yang aktif. Mode demo tidak memiliki akun atau kata sandi sungguhan.</p></article>
+          <article class="panel"><div class="panel-heading"><div><h3>Data demo</h3><p>Data contoh untuk menguji fitur sebelum memakai data asli.</p></div></div><p class="muted">Kamu dapat memuat ulang data contoh atau menghapus data lokal. Ini tidak menghapus data di Supabase.</p><div class="settings-actions"><button id="reloadDemo" class="btn secondary">Muat ulang data contoh</button><button id="clearLocal" class="btn danger">Hapus data lokal</button></div><div class="notice info">Login online menggunakan Supabase Auth. Buat satu akun kepala divisi dari Supabase Dashboard, lalu nonaktifkan pendaftaran publik agar orang lain tidak bisa membuat akun sendiri.</div></article>
+        </div>
+        <article class="panel setup-panel"><div class="panel-heading"><div><h3>Checklist aktivasi online</h3><p>Langkah yang harus dilakukan sebelum dipakai untuk data kerja.</p></div></div><ol class="setup-list"><li>Buat proyek Supabase baru khusus Dashboard Sales & Marketing.</li><li>Buat satu pengguna kepala divisi melalui Authentication → Users.</li><li>Buat tabel omzet, chat, dan BCG serta aktifkan Row Level Security.</li><li>Terapkan kebijakan agar hanya user yang diizinkan dapat membaca dan mengubah data.</li><li>Hubungkan proyek di menu ini, lalu uji login dan sinkronisasi dari perangkat lain.</li></ol><p class="tiny muted">Versi awal ini menyiapkan antarmuka dan mode demo. Sinkronisasi CRUD Supabase untuk seluruh modul dan kebijakan SQL perlu diaktifkan setelah proyek dibuat agar tidak berpura-pura menyimpan data online.</p></article>
+      </section>
+      <footer>HAPPY HOME · Ceriakan Rumahmu <span>Sales & Marketing Workspace</span></footer>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>
