@@ -29,7 +29,7 @@
       chats.push({id:"demo-c-wa-"+ds,date:ds,count:24+((i*5)%18),channel:"WhatsApp",notes:i%4===0?"Pertanyaan promo":""}); chats.push({id:"demo-c-ig-"+ds,date:ds,count:4+(i%6),channel:"Instagram",notes:""}); chats.push({id:"demo-c-tt-"+ds,date:ds,count:2+(i%5),channel:"TikTok",notes:""}); chats.push({id:"demo-c-web-"+ds,date:ds,count:i%3,channel:"Website",notes:""});
     }
     const names=["Rak Piring Stainless","Wadah Makan Set","Teko Listrik","Gelas Kaca 6 pcs","Sapu Lantai","Tempat Bumbu","Panci Serbaguna","Botol Minum","Keset Rumah","Tempat Sampah"];
-    const bcg=names.map((name,i)=>({id:"demo-b-"+i,period:monthNow,code:"HH"+String(1001+i),name,sales:1200000+((i*93731)%4800000),previous:900000+((i*41319)%3500000),margin:12+(i%6)*3}));
+    const bcg=names.map((name,i)=>({id:"demo-b-"+i,period:monthNow,code:"HH"+String(1001+i),name,sales:1200000+((i*93731)%4800000),previous:900000+((i*41319)%3500000),units:15+((i*17)%130),previousUnits:10+((i*13)%100),margin:12+(i%6)*3}));
     return {revenue,chats,bcg};
   }
   function loadLocal() {
@@ -55,17 +55,22 @@
     target.innerHTML=totals.map(x=>`<div class="channel-chip"><span>${meta[x.channel]||x.channel}</span><strong>${fmtNum(x.total)}</strong><small>${esc(x.channel)}</small></div>`).join("");
   }
   function currentMonth(){return $("dashboardMonth").value||monthNow;}
-  function categoryFor(item, totalSales) {
-    const growth = item.previous > 0 ? ((item.sales-item.previous)/item.previous)*100 : (item.sales>0?100:0);
-    const contribution = totalSales>0 ? item.sales/totalSales*100 : 0;
-    // Simple internal portfolio rule: high growth >= 20%, high contribution >= 10%.
+  function previousMonth(month){const d=new Date(Number(month.slice(0,4)),Number(month.slice(5,7))-2,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;}
+  function categoryFor(item,total,metric="sales") {
+    const value=Number(item[metric])||0;
+    const previous=metric==="units"?(Number(item.previousUnits)||0):(Number(item.previous)||0);
+    const growth=previous>0?((value-previous)/previous)*100:0;
+    const contribution=total>0?value/total*100:0;
     const highGrowth=growth>=20, highShare=contribution>=10;
     return {growth,contribution,category:highGrowth?(highShare?"Star":"Question Mark"):(highShare?"Cash Cow":"Dog")};
   }
   function bcgForMonth(month){
-    const rows=monthRows(state.bcg,month,"period");
-    const total=rows.reduce((s,r)=>s+(Number(r.sales)||0),0);
-    return rows.map(r=>({...r,...categoryFor(r,total)}));
+    const rows=monthRows(state.bcg,month,"period"), prevRows=monthRows(state.bcg,previousMonth(month),"period");
+    const prevByCode=new Map(prevRows.map(r=>[String(r.code||""),r]));
+    const metric=$("bcgMetric")?.value||"sales";
+    const joined=rows.map(r=>{const p=prevByCode.get(String(r.code||""));return {...r,previous:p?Number(p.sales)||0:(Number(r.previous)||0),previousUnits:p?Number(p.units)||0:(Number(r.previousUnits)||0)};});
+    const total=joined.reduce((sum,r)=>sum+(Number(r[metric])||0),0);
+    return joined.map(r=>({...r,...categoryFor(r,total,metric)}));
   }
   function activateDemo(){
     demoMode=true;supabaseClient=null;
@@ -117,10 +122,10 @@
     $("countStar").textContent=n("Star");$("countCow").textContent=n("Cash Cow");$("countQuestion").textContent=n("Question Mark");$("countDog").textContent=n("Dog");
     document.querySelectorAll("[data-bcg-category]").forEach(b=>{const active=b.dataset.bcgCategory===selectedBcgCategory;b.classList.toggle("selected",active);b.setAttribute("aria-pressed",String(active));});
     const table=$("bcgTableBody");
-    if(!selectedBcgCategory){$("bcgTableTitle").textContent="Hasil klasifikasi";$("bcgTableMeta").textContent=`${all.length} barang dianalisis · ${monthLabel(m)}. Pilih kategori untuk melihat daftar.`;table.innerHTML='<tr><td colspan="6" class="empty-cell">Pilih kartu Star, Cash Cow, Question Mark, atau Dog untuk melihat barang dalam kategori tersebut.</td></tr>';return;}
+    if(!selectedBcgCategory){$("bcgTableTitle").textContent="Hasil klasifikasi";$("bcgTableMeta").textContent=`${all.length} barang dianalisis · ${monthLabel(m)}. Pilih kategori untuk melihat daftar.`;table.innerHTML='<tr><td colspan="7" class="empty-cell">Pilih kartu Star, Cash Cow, Question Mark, atau Dog untuk melihat barang dalam kategori tersebut.</td></tr>';return;}
     const categoryRows=all.filter(r=>r.category===selectedBcgCategory);const rows=categoryRows.filter(r=>(r.name+" "+r.code).toLowerCase().includes(search));
-    $("bcgTableTitle").textContent=selectedBcgCategory;$("bcgTableMeta").textContent=`${rows.length} dari ${categoryRows.length} barang · ${monthLabel(m)}`;
-    table.innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.code)}</td><td><strong>${esc(r.name)}</strong></td><td>${fmtRp(r.sales)}</td><td>${Number(r.growth).toFixed(1)}%</td><td>${Number(r.contribution).toFixed(1)}%</td><td><span class="tag ${r.category.toLowerCase().replace(" ","-")}">${esc(r.category)}</span></td></tr>`).join(""):'<tr><td colspan="6" class="empty-cell">Tidak ada barang yang cocok di kategori ini.</td></tr>';
+    $("bcgTableTitle").textContent=selectedBcgCategory;$("bcgTableMeta").textContent=`${rows.length} dari ${categoryRows.length} barang · ${monthLabel(m)} · berdasarkan ${$("bcgMetric")?.value==="units"?"unit terjual":"omzet"}`;
+    table.innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.code)}</td><td><strong>${esc(r.name)}</strong></td><td>${fmtRp(r.sales)}</td><td>${fmtNum(r.units||0)}</td><td>${Number(r.growth).toFixed(1)}%</td><td>${Number(r.contribution).toFixed(1)}%</td><td><span class="tag ${r.category.toLowerCase().replace(" ","-")}">${esc(r.category)}</span></td></tr>`).join(""):'<tr><td colspan="7" class="empty-cell">Tidak ada barang yang cocok di kategori ini.</td></tr>';
   }
   function renderChat(){
     const m=$("chatMonth").value||monthNow, allRows=monthRows(state.chats,m).sort((a,b)=>b.date.localeCompare(a.date));
@@ -148,13 +153,13 @@
   function toRemoteRow(key,r){
     if(key==="revenue")return {id:r.id,work_date:r.date,store1:Number(r.store1)||0,store2:Number(r.store2)||0,notes:r.notes||""};
     if(key==="chats")return {id:r.id,work_date:r.date,chat_count:Number(r.count)||0,channel:r.channel||"Lainnya",notes:r.notes||""};
-    return {id:r.id,period:(String(r.period||"").length===7?String(r.period)+"-01":r.period),product_code:r.code||"",product_name:r.name||"",sales:Number(r.sales)||0,previous_sales:Number(r.previous)||0,margin:Number(r.margin)||0};
+    return {id:r.id,period:(String(r.period||"").length===7?String(r.period)+"-01":r.period),product_code:r.code||"",product_name:r.name||"",sales:Number(r.sales)||0,previous_sales:Number(r.previous)||0,units_sold:Number(r.units)||0,previous_units_sold:Number(r.previousUnits)||0,margin:Number(r.margin)||0};
   }
   function fromRemoteRows(revenue,chats,bcg){
     return {
       revenue:(revenue||[]).map(r=>({id:r.id,date:r.work_date,store1:Number(r.store1)||0,store2:Number(r.store2)||0,notes:r.notes||""})),
       chats:(chats||[]).map(r=>({id:r.id,date:r.work_date,count:Number(r.chat_count)||0,channel:r.channel||"Lainnya",notes:r.notes||""})),
-      bcg:(bcg||[]).map(r=>({id:r.id,period:String(r.period||"").slice(0,7),code:r.product_code||"",name:r.product_name||"",sales:Number(r.sales)||0,previous:Number(r.previous_sales)||0,margin:r.margin==null?null:Number(r.margin)}))
+      bcg:(bcg||[]).map(r=>({id:r.id,period:String(r.period||"").slice(0,7),code:r.product_code||"",name:r.product_name||"",sales:Number(r.sales)||0,previous:Number(r.previous_sales)||0,units:Number(r.units_sold)||0,previousUnits:Number(r.previous_units_sold)||0,margin:r.margin==null?null:Number(r.margin)}))
     };
   }
   async function loadOnlineData(){
@@ -165,7 +170,7 @@
     const [rev,chats,bcg]=await Promise.all([
       supabaseClient.from("hh_revenue").select("id,work_date,store1,store2,notes").order("work_date",{ascending:false}),
       supabaseClient.from("hh_chats").select("id,work_date,chat_count,channel,notes").order("work_date",{ascending:false}),
-      supabaseClient.from("hh_bcg_items").select("id,period,product_code,product_name,sales,previous_sales,margin").order("period",{ascending:false})
+      supabaseClient.from("hh_bcg_items").select("id,period,product_code,product_name,sales,previous_sales,units_sold,previous_units_sold,margin").order("period",{ascending:false})
     ]);
     const err=[rev.error,chats.error,bcg.error].find(Boolean);if(err)throw err;
     state=fromRemoteRows(rev.data,chats.data,bcg.data);saveLocal();renderAll();
@@ -202,7 +207,7 @@
   function exportCsv(filename,rows){if(!rows.length){toast("Tidak ada data untuk diekspor.");return;}const csv=rows.map(row=>row.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\r\n");downloadBlob(filename,new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8;"}));toast("File ekspor disiapkan.");}
   function exportBcg(){
     const rows=bcgForMonth($("bcgPeriod").value||monthNow);if(!rows.length){toast("Belum ada data BCG untuk diekspor.");return;}
-    const data=[["Kode Barang","Nama Barang","Penjualan","Penjualan Sebelumnya","Pertumbuhan (%)","Kontribusi (%)","Margin (%)","Kategori"],...rows.map(r=>[r.code,r.name,r.sales,r.previous,Number(r.growth.toFixed(2)),Number(r.contribution.toFixed(2)),r.margin??"",r.category])];
+    const data=[["Kode Barang","Nama Barang","Penjualan (Rp)","Unit Terjual","Penjualan Sebelumnya (Rp)","Unit Terjual Sebelumnya","Pertumbuhan (%)","Kontribusi (%)","Margin (%)","Kategori"],...rows.map(r=>[r.code,r.name,r.sales,r.units||0,r.previous,r.previousUnits||0,Number(r.growth.toFixed(2)),Number(r.contribution.toFixed(2)),r.margin??"",r.category])];
     const period=$("bcgPeriod").value||monthNow;
     try{if(window.XLSX&&XLSX.utils&&XLSX.writeFile){const ws=XLSX.utils.aoa_to_sheet(data);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"BCG");XLSX.writeFile(wb,`BCG-Happy-Home-${period}.xlsx`);toast("Ekspor Excel berhasil dibuat.");return;}}catch(err){console.warn("Ekspor XLSX gagal, beralih ke CSV",err);}
     exportCsv(`BCG-Happy-Home-${period}.csv`,data);
@@ -226,7 +231,7 @@
       if(salesI<0&&qtyI<0)throw new Error("Kolom TOTAL PENJUALAN (Rp) atau TOTAL QTY TERJUAL tidak ditemukan.");
       const month=$("bcgPeriod").value||monthNow, imported=[];
       const parseNum=v=>{if(typeof v==="number")return Number.isFinite(v)?v:0;let n=String(v??"").trim().replace(/[^\d,.-]/g,"");if(n.includes(",")&&n.includes(".")){if(n.lastIndexOf(",")>n.lastIndexOf("."))n=n.replace(/\./g,"").replace(",",".");else n=n.replace(/,/g,"");}else if(n.includes(",")){n=n.replace(",",".");}else{n=n.replace(/\.(?=\d{3}(\D|$))/g,"");}return Number(n)||0;};
-      rows.slice(headerRowIndex+1).forEach((row,i)=>{const name=String(row[nameI]||"").trim();if(!name)return;const sales=parseNum(row[salesI>=0?salesI:qtyI]);const prev=prevI>=0?parseNum(row[prevI]):0;const rawCode=codeI>=0?String(row[codeI]??"").trim():"";imported.push({id:uid(),period:month,code:rawCode||`IMP-${i+1}`,name,sales,previous:prev,margin:marginI>=0?parseNum(row[marginI]):0});});
+      rows.slice(headerRowIndex+1).forEach((row,i)=>{const name=String(row[nameI]||"").trim();if(!name)return;const sales=salesI>=0?parseNum(row[salesI]):0;const units=qtyI>=0?parseNum(row[qtyI]):0;const prev=prevI>=0?parseNum(row[prevI]):0;const rawCode=codeI>=0?String(row[codeI]??"").trim():"";imported.push({id:uid(),period:month,code:rawCode||`IMP-${i+1}`,name,sales,previous:prev,units,previousUnits:0,margin:marginI>=0?parseNum(row[marginI]):0});});
       if(!imported.length)throw new Error("Tidak ada baris barang yang dapat dibaca.");
       await replaceBcgMonth(month,imported);toast(`${imported.length} barang berhasil dianalisis untuk ${monthLabel(month)}.`);
     }catch(err){toast(err.message||"Gagal membaca file.");}
@@ -284,7 +289,7 @@
     });
     $("logoutButton").addEventListener("click",async()=>{if(supabaseClient&&!demoMode){await supabaseClient.auth.signOut();}demoMode=true;showAuth();toast("Kamu sudah keluar dari akun online.");});
     $("dashboardMonth").addEventListener("change",renderDashboard);
-    $("bcgPeriod").addEventListener("change",renderBcg);$("bcgSearch").addEventListener("input",renderBcg);document.querySelectorAll("[data-bcg-category]").forEach(b=>b.addEventListener("click",()=>{selectedBcgCategory=selectedBcgCategory===b.dataset.bcgCategory?null:b.dataset.bcgCategory;renderBcg();}));
+    $("bcgPeriod").addEventListener("change",renderBcg);if($("bcgMetric"))$("bcgMetric").addEventListener("change",renderBcg);$("bcgSearch").addEventListener("input",renderBcg);document.querySelectorAll("[data-bcg-category]").forEach(b=>b.addEventListener("click",()=>{selectedBcgCategory=selectedBcgCategory===b.dataset.bcgCategory?null:b.dataset.bcgCategory;renderBcg();}));
     $("sampleBcgButton").addEventListener("click",async()=>{const m=$("bcgPeriod").value||monthNow;const demo=seedData().bcg.map(r=>({...r,id:uid(),period:m}));try{await replaceBcgMonth(m,demo);toast("Data contoh BCG dimuat.");}catch(err){toast("Gagal menyimpan data BCG: "+err.message);}});
     $("importBcgButton").addEventListener("click",importBcg);$("exportBcgButton").addEventListener("click",exportBcg);
     $("chatForm").addEventListener("submit",async e=>{e.preventDefault();const date=$("chatDate").value;const id=$("chatEditId").value||uid();try{await upsert("chats",{id,date,count:Number($("chatCount").value),channel:$("chatChannel").value,notes:$("chatNotes").value.trim()});resetChatForm();$("chatMonth").value=date.slice(0,7)||monthNow;renderAll();toast("Catatan chat disimpan.");}catch(e){}});
