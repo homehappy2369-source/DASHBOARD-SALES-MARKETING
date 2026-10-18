@@ -193,7 +193,12 @@
         if(error)throw error;
       }
       const oldIds=oldRows.filter(r=>!imported.some(n=>n.id===r.id)).map(r=>r.id);
-      if(oldIds.length){const {error}=await supabaseClient.from("hh_bcg_items").delete().in("id",oldIds);if(error)throw error;}
+      // Hapus bertahap agar URL PostgREST tidak terlalu panjang untuk ribuan barang.
+      for(let i=0;i<oldIds.length;i+=100){
+        const batch=oldIds.slice(i,i+100);
+        const {error}=await supabaseClient.from("hh_bcg_items").delete().in("id",batch);
+        if(error)throw error;
+      }
     }
     state.bcg=state.bcg.filter(r=>r.period!==month).concat(imported);saveLocal();renderAll();
   }
