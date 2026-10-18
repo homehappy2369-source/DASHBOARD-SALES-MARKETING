@@ -1,6 +1,5 @@
 /* Happy Home Sales & Marketing Dashboard
- * Demo mode uses localStorage only. Online synchronization is not enabled until
- * Supabase tables + RLS policies are deliberately configured.
+ * Project connection is preconfigured for all devices. Online data uses Supabase Auth + RLS.
  */
 (() => {
   "use strict";
@@ -19,7 +18,7 @@
   let demoMode = true, supabaseClient = null, charts = {};
   let currentPage = "dashboard";
   let selectedBcgCategory = null, showAllChatHistory = false;
-  const defaultConfig = {url:"",key:""};
+  const defaultConfig = {url:"https://xymwgerrtzdyieojlbfc.supabase.co",key:"sb_publishable_btgLdSEFwi4X7GKgtTRLKg_3J45Y7ho"};
 
   function seedData() {
     const revenue=[], chats=[];
@@ -149,13 +148,13 @@
   function toRemoteRow(key,r){
     if(key==="revenue")return {id:r.id,work_date:r.date,store1:Number(r.store1)||0,store2:Number(r.store2)||0,notes:r.notes||""};
     if(key==="chats")return {id:r.id,work_date:r.date,chat_count:Number(r.count)||0,channel:r.channel||"Lainnya",notes:r.notes||""};
-    return {id:r.id,period:r.period,product_code:r.code||"",product_name:r.name||"",sales:Number(r.sales)||0,previous_sales:Number(r.previous)||0,margin:r.margin==null?null:Number(r.margin)};
+    return {id:r.id,period:(String(r.period||"").length===7?String(r.period)+"-01":r.period),product_code:r.code||"",product_name:r.name||"",sales:Number(r.sales)||0,previous_sales:Number(r.previous)||0,margin:Number(r.margin)||0};
   }
   function fromRemoteRows(revenue,chats,bcg){
     return {
       revenue:(revenue||[]).map(r=>({id:r.id,date:r.work_date,store1:Number(r.store1)||0,store2:Number(r.store2)||0,notes:r.notes||""})),
       chats:(chats||[]).map(r=>({id:r.id,date:r.work_date,count:Number(r.chat_count)||0,channel:r.channel||"Lainnya",notes:r.notes||""})),
-      bcg:(bcg||[]).map(r=>({id:r.id,period:r.period,code:r.product_code||"",name:r.product_name||"",sales:Number(r.sales)||0,previous:Number(r.previous_sales)||0,margin:r.margin==null?null:Number(r.margin)}))
+      bcg:(bcg||[]).map(r=>({id:r.id,period:String(r.period||"").slice(0,7),code:r.product_code||"",name:r.product_name||"",sales:Number(r.sales)||0,previous:Number(r.previous_sales)||0,margin:r.margin==null?null:Number(r.margin)}))
     };
   }
   async function loadOnlineData(){
@@ -199,13 +198,16 @@
     try{await saveRemoteRow(key,item);saveLocal();renderAll();}
     catch(err){if(index>=0)state[key][index]=previous;else state[key]=state[key].filter(r=>r.id!==item.id);renderAll();toast("Gagal menyimpan ke Supabase: "+err.message);throw err;}
   }
-  function exportCsv(filename,rows){if(!rows.length){toast("Tidak ada data untuk diekspor.");return;}const csv=rows.map(row=>row.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\r\n");const blob=new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8;"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);toast("File ekspor disiapkan.");}
+  function downloadBlob(filename,blob){const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);}
+  function exportCsv(filename,rows){if(!rows.length){toast("Tidak ada data untuk diekspor.");return;}const csv=rows.map(row=>row.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\r\n");downloadBlob(filename,new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8;"}));toast("File ekspor disiapkan.");}
   function exportBcg(){
     const rows=bcgForMonth($("bcgPeriod").value||monthNow);if(!rows.length){toast("Belum ada data BCG untuk diekspor.");return;}
     const data=[["Kode Barang","Nama Barang","Penjualan","Penjualan Sebelumnya","Pertumbuhan (%)","Kontribusi (%)","Margin (%)","Kategori"],...rows.map(r=>[r.code,r.name,r.sales,r.previous,Number(r.growth.toFixed(2)),Number(r.contribution.toFixed(2)),r.margin??"",r.category])];
-    if(window.XLSX){const ws=XLSX.utils.aoa_to_sheet(data);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"BCG");XLSX.writeFile(wb,`BCG-Happy-Home-${$("bcgPeriod").value||monthNow}.xlsx`);}else exportCsv(`BCG-Happy-Home-${monthNow}.csv`,data);
+    const period=$("bcgPeriod").value||monthNow;
+    try{if(window.XLSX&&XLSX.utils&&XLSX.writeFile){const ws=XLSX.utils.aoa_to_sheet(data);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"BCG");XLSX.writeFile(wb,`BCG-Happy-Home-${period}.xlsx`);toast("Ekspor Excel berhasil dibuat.");return;}}catch(err){console.warn("Ekspor XLSX gagal, beralih ke CSV",err);}
+    exportCsv(`BCG-Happy-Home-${period}.csv`,data);
   }
-  function normalizeHeader(s){return String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");}
+  function normalizeHeader(s){return String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]/g,"");}
   function findCol(headers,aliases){return headers.findIndex(h=>aliases.includes(normalizeHeader(h)));}
   async function importBcg(){
     const file=$("bcgFile").files[0];if(!file){toast("Pilih file Excel atau CSV terlebih dahulu.");return;}
@@ -216,12 +218,15 @@
         const wb=XLSX.read(await file.arrayBuffer(),{type:"array"});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:""});
       }
       if(!rows||rows.length<2)throw new Error("File tidak berisi baris data yang cukup.");
-      const headers=rows[0], codeI=findCol(headers,["kode","kodebarang","code","itemcode","sku"]), nameI=findCol(headers,["nama","namabarang","name","itemname","barang"]), salesI=findCol(headers,["penjualan","totalpenjualan","omzet","sales","salesamount","total","nilaipenjualan"]), qtyI=findCol(headers,["qty","jumlahterjual","quantity","terjual"]), prevI=findCol(headers,["penjualansebelumnya","penjualanbulanlalu","previoussales","salesprevious","omzetsebelumnya"]), marginI=findCol(headers,["margin","marginpersen","labapersen","profitmargin"]);
-      if(nameI<0)throw new Error("Kolom nama barang tidak ditemukan. Gunakan header Nama Barang atau Nama.");
-      if(salesI<0&&qtyI<0)throw new Error("Kolom penjualan/omzet atau jumlah terjual tidak ditemukan. Periksa header Excel.");
+      // Cari baris header, termasuk format rekap AIPOS yang digunakan Happy Home.
+      let headerRowIndex=rows.findIndex((row,i)=>i<15&&row.some(cell=>["barcode","namabarang","totalpenjualanrp","totalqtyterjual"].includes(normalizeHeader(cell))));
+      if(headerRowIndex<0)headerRowIndex=0;
+      const headers=rows[headerRowIndex], codeI=findCol(headers,["kode","kodebarang","barcode","code","itemcode","sku"]), nameI=findCol(headers,["nama","namabarang","name","itemname","barang"]), salesI=findCol(headers,["penjualan","totalpenjualan","totalpenjualanrp","totalpenjualanrupiah","omzet","sales","salesamount","total","nilaipenjualan"]), qtyI=findCol(headers,["qty","totalqtyterjual","jumlahterjual","quantity","terjual"]), prevI=findCol(headers,["penjualansebelumnya","penjualanbulanlalu","previoussales","salesprevious","omzetsebelumnya"]), marginI=findCol(headers,["margin","marginpersen","labapersen","profitmargin"]);
+      if(nameI<0)throw new Error("Kolom NAMA BARANG tidak ditemukan. Periksa baris judul kolom di file Excel.");
+      if(salesI<0&&qtyI<0)throw new Error("Kolom TOTAL PENJUALAN (Rp) atau TOTAL QTY TERJUAL tidak ditemukan.");
       const month=$("bcgPeriod").value||monthNow, imported=[];
-      const parseNum=v=>Number(String(v??0).replace(/[^\d,.-]/g,"").replace(/\.(?=\d{3}(\D|$))/g,"").replace(",", "."))||0;
-      rows.slice(1).forEach((row,i)=>{const name=String(row[nameI]||"").trim();if(!name)return;const sales=parseNum(row[salesI>=0?salesI:qtyI]);const prev=prevI>=0?parseNum(row[prevI]):0;imported.push({id:uid(),period:month,code:codeI>=0?String(row[codeI]||"").trim():`IMP-${i+1}`,name,sales,previous:prev,margin:marginI>=0?parseNum(row[marginI]):null});});
+      const parseNum=v=>{if(typeof v==="number")return Number.isFinite(v)?v:0;let n=String(v??"").trim().replace(/[^\d,.-]/g,"");if(n.includes(",")&&n.includes(".")){if(n.lastIndexOf(",")>n.lastIndexOf("."))n=n.replace(/\./g,"").replace(",",".");else n=n.replace(/,/g,"");}else if(n.includes(",")){n=n.replace(",",".");}else{n=n.replace(/\.(?=\d{3}(\D|$))/g,"");}return Number(n)||0;};
+      rows.slice(headerRowIndex+1).forEach((row,i)=>{const name=String(row[nameI]||"").trim();if(!name)return;const sales=parseNum(row[salesI>=0?salesI:qtyI]);const prev=prevI>=0?parseNum(row[prevI]):0;const rawCode=codeI>=0?String(row[codeI]??"").trim():"";imported.push({id:uid(),period:month,code:rawCode||`IMP-${i+1}`,name,sales,previous:prev,margin:marginI>=0?parseNum(row[marginI]):0});});
       if(!imported.length)throw new Error("Tidak ada baris barang yang dapat dibaca.");
       await replaceBcgMonth(month,imported);toast(`${imported.length} barang berhasil dianalisis untuk ${monthLabel(month)}.`);
     }catch(err){toast(err.message||"Gagal membaca file.");}
@@ -230,7 +235,7 @@
   function resetChatForm(){$("chatForm").reset();$("chatEditId").value="";$("chatDate").value=localDate(today);$("saveChatButton").textContent="Simpan catatan";$("cancelChatEdit").classList.add("hidden");}
   function setEditRevenue(id){const r=state.revenue.find(x=>x.id===id);if(!r)return;$("revenueEditId").value=r.id;$("revenueDate").value=r.date;$("store1Amount").value=r.store1;$("store2Amount").value=r.store2;$("revenueNotes").value=r.notes||"";$("saveRevenueButton").textContent="Simpan perubahan";$("cancelRevenueEdit").classList.remove("hidden");window.scrollTo({top:0,behavior:"smooth"});}
   function resetRevenueForm(){$("revenueForm").reset();$("revenueEditId").value="";$("revenueDate").value=localDate(today);$("saveRevenueButton").textContent="Simpan omzet";$("cancelRevenueEdit").classList.add("hidden");}
-  function getConfig(){try{return {...defaultConfig,...JSON.parse(localStorage.getItem(CONFIG_KEY)||"{}")};}catch(e){return defaultConfig;}}
+  function getConfig(){return defaultConfig;}
   async function connectSupabase(url,key){
     if(!url||!key)throw new Error("Isi Project URL dan publishable/anon key terlebih dahulu.");
     if(!window.supabase?.createClient)throw new Error("Library Supabase belum termuat. Periksa koneksi internet.");
@@ -239,7 +244,7 @@
     const {data:{session},error}=await client.auth.getSession();if(error)throw error;
     supabaseClient=client;
     localStorage.setItem(CONFIG_KEY,JSON.stringify({url,key}));$("supabaseStatus").textContent="Terhubung";$("connectionLabel").textContent="Supabase siap";$("connectionDetail").textContent=session?"Sesi login aktif":"Login diperlukan";
-    toast("Koneksi Supabase tersimpan. Silakan login online untuk memuat data.");return client;
+    toast("Koneksi Supabase siap. Silakan login untuk memuat dan menyinkronkan data online.");return client;
   }
   function bindEvents(){
     document.querySelectorAll(".nav-item[data-page]").forEach(b=>b.addEventListener("click",()=>showPage(b.dataset.page)));
@@ -301,7 +306,7 @@
     ["dashboardMonth","bcgPeriod","chatMonth","revenueMonth"].forEach(id=>$(id).value=monthNow);
     $("chatDate").value=localDate(today);$("revenueDate").value=localDate(today);
     const cfg=getConfig();$("supabaseUrl").value=cfg.url||"";$("supabaseKey").value=cfg.key||"";
-    if(cfg.url&&cfg.key){$("configHint").textContent="Konfigurasi Supabase ditemukan di browser ini.";connectSupabase(cfg.url,cfg.key).catch(err=>{$("configHint").textContent="Koneksi belum siap: "+err.message;});}
+    if(cfg.url&&cfg.key){$("configHint").textContent="Koneksi Supabase sudah dikonfigurasi otomatis.";connectSupabase(cfg.url,cfg.key).catch(err=>{$("configHint").textContent="Koneksi belum siap: "+err.message;});}
     bindEvents();renderAll();
     // Always begin at authentication screen; demo access is an explicit user action.
     showAuth();
