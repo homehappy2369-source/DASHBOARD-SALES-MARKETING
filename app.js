@@ -182,18 +182,28 @@
       bcg:(bcg||[]).map(r=>({id:r.id,period:String(r.period||"").slice(0,7),code:r.product_code||"",name:r.product_name||"",sales:Number(r.sales)||0,previous:Number(r.previous_sales)||0,units:Number(r.units_sold)||0,previousUnits:Number(r.previous_units_sold)||0,margin:r.margin==null?null:Number(r.margin)}))
     };
   }
+  async function fetchAllRows(makeQuery){
+    const all=[]; const pageSize=1000; let from=0;
+    while(true){
+      const {data,error}=await makeQuery().range(from,from+pageSize-1);
+      if(error)throw error;
+      const page=data||[]; all.push(...page);
+      if(page.length<pageSize)break;
+      from+=pageSize;
+    }
+    return all;
+  }
   async function loadOnlineData(){
     if(!supabaseClient)throw new Error("Koneksi Supabase belum siap.");
     const {data:allowed,error:allowError}=await supabaseClient.rpc("hh_is_allowed_user");
     if(allowError)throw allowError;
     if(!allowed)throw new Error("Akun ini belum diizinkan mengakses dashboard. Pastikan UUID akun sudah ditambahkan ke tabel allowed_users.");
-    const [rev,chats,bcg]=await Promise.all([
-      supabaseClient.from("hh_revenue").select("id,work_date,store1,store2,notes").order("work_date",{ascending:false}),
-      supabaseClient.from("hh_chats").select("id,work_date,chat_count,channel,notes").order("work_date",{ascending:false}),
-      supabaseClient.from("hh_bcg_items").select("id,period,product_code,product_name,sales,previous_sales,units_sold,previous_units_sold,margin").order("period",{ascending:false})
+    const [revenue,chats,bcg]=await Promise.all([
+      fetchAllRows(()=>supabaseClient.from("hh_revenue").select("id,work_date,store1,store2,notes").order("work_date",{ascending:false})),
+      fetchAllRows(()=>supabaseClient.from("hh_chats").select("id,work_date,chat_count,channel,notes").order("work_date",{ascending:false})),
+      fetchAllRows(()=>supabaseClient.from("hh_bcg_items").select("id,period,product_code,product_name,sales,previous_sales,units_sold,previous_units_sold,margin").order("period",{ascending:false}))
     ]);
-    const err=[rev.error,chats.error,bcg.error].find(Boolean);if(err)throw err;
-    state=fromRemoteRows(rev.data,chats.data,bcg.data);saveLocal();renderAll();
+    state=fromRemoteRows(revenue,chats,bcg);saveLocal();renderAll();
   }
   async function saveRemoteRow(key,item){
     if(demoMode||!supabaseClient)return;
@@ -206,17 +216,26 @@
     if(error)throw error;
   }
   async function replaceBcgMonth(month,imported){
-    const oldRows=state.bcg.filter(r=>r.period===month);
     if(!demoMode&&supabaseClient){
-      if(imported.length){
-        const {error}=await supabaseClient.from("hh_bcg_items").upsert(imported.map(r=>toRemoteRow("bcg",r)));
+      const periodDate=String(month).length===7?String(month)+"-01":String(month);
+      const existingIds=[]; const pageSize=1000; let from=0;
+      // Ambil semua ID lama untuk bulan ini dari server, bukan hanya data yang kebetulan sudah termuat di browser.
+      while(true){
+        const {data,error}=await supabaseClient.from("hh_bcg_items").select("id").eq("period",periodDate).range(from,from+pageSize-1);
+        if(error)throw error;
+        const page=data||[]; existingIds.push(...page.map(r=>r.id));
+        if(page.length<pageSize)break;
+        from+=pageSize;
+      }
+      const remoteRows=imported.map(r=>toRemoteRow("bcg",r));
+      for(let i=0;i<remoteRows.length;i+=500){
+        const {error}=await supabaseClient.from("hh_bcg_items").upsert(remoteRows.slice(i,i+500));
         if(error)throw error;
       }
-      const oldIds=oldRows.filter(r=>!imported.some(n=>n.id===r.id)).map(r=>r.id);
-      // Hapus bertahap agar URL PostgREST tidak terlalu panjang untuk ribuan barang.
-      for(let i=0;i<oldIds.length;i+=100){
-        const batch=oldIds.slice(i,i+100);
-        const {error}=await supabaseClient.from("hh_bcg_items").delete().in("id",batch);
+      const newIds=new Set(imported.map(r=>r.id));
+      const deleteIds=existingIds.filter(id=>!newIds.has(id));
+      for(let i=0;i<deleteIds.length;i+=100){
+        const {error}=await supabaseClient.from("hh_bcg_items").delete().in("id",deleteIds.slice(i,i+100));
         if(error)throw error;
       }
     }
@@ -279,7 +298,7 @@
       if(periodI>=0)dataRows.forEach(row=>{const m=parsePeriodValue(row[periodI]);if(m)periodCounts.set(m,(periodCounts.get(m)||0)+1);});
       const fileMonth=periodFromFilename(file.name);
       const detectedMonth=[...periodCounts.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]||fileMonth;
-      const month=detectedMonth||$("bcgPeriod").value||monthNow;
+      const month=fileMonth||detectedMonth||$("bcgPeriod").value||monthNow;
       // Periode dari isi rekap (mis. 09-2026) didahulukan; nama file menjadi cadangan.
       const imported=[];
       dataRows.forEach((row,i)=>{const name=String(row[nameI]||"").trim();const sales=salesI>=0?parseNum(row[salesI]):0;const units=qtyI>=0?parseNum(row[qtyI]):0;const prev=prevI>=0?parseNum(row[prevI]):0;const rawCode=codeI>=0?String(row[codeI]??"").trim():"";imported.push({id:uid(),period:month,code:rawCode||`IMP-${i+1}`,name,sales,previous:prev,units,previousUnits:0,margin:marginI>=0?parseNum(row[marginI]):0});});
