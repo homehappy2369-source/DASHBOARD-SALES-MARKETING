@@ -64,10 +64,10 @@
   }
   function bcgForMonth(month){
     const rows=monthRows(state.bcg,month,"period"), prevRows=monthRows(state.bcg,previousMonth(month),"period");
-    const prevByCode=new Map(prevRows.map(r=>[String(r.code||"").trim(),r]));
+    const prevByCode=new Map(prevRows.map(r=>[normalizeProductCode(r.code),r]));
     const metric=$("bcgMetric")?.value||"sales";
     const joined=rows.map(r=>{
-      const p=prevByCode.get(String(r.code||"").trim());
+      const p=prevByCode.get(normalizeProductCode(r.code));
       return {...r,previous:p?Number(p.sales)||0:(Number(r.previous)||0),previousUnits:p?Number(p.units)||0:(Number(r.previousUnits)||0)};
     });
     const total=joined.reduce((sum,r)=>sum+(Number(r[metric])||0),0);
@@ -239,6 +239,25 @@
   }
   function normalizeHeader(s){return String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]/g,"");}
   function findCol(headers,aliases){return headers.findIndex(h=>aliases.includes(normalizeHeader(h)));}
+  function normalizeProductCode(value){
+    const code=String(value??"").trim().replace(/\s+/g,"");
+    // Barcode numerik kadang dibaca Excel sebagai angka sehingga nol di depan hilang.
+    return /^\d+$/.test(code)?(code.replace(/^0+(?=\d)/,"")||"0"):code.toUpperCase();
+  }
+  function parsePeriodValue(value){
+    const v=String(value??"").trim(); if(!v)return "";
+    let m=v.match(/^(\d{1,2})[-/.](\d{4})$/); if(m&&+m[1]>=1&&+m[1]<=12)return `${m[2]}-${String(+m[1]).padStart(2,"0")}`;
+    m=v.match(/^(\d{4})[-/.](\d{1,2})$/); if(m&&+m[2]>=1&&+m[2]<=12)return `${m[1]}-${String(+m[2]).padStart(2,"0")}`;
+    m=v.match(/^(\d{4})-(\d{2})/); if(m&&+m[2]>=1&&+m[2]<=12)return `${m[1]}-${m[2]}`;
+    if(value instanceof Date&&!Number.isNaN(value.getTime()))return `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,"0")}`;
+    return "";
+  }
+  function periodFromFilename(filename){
+    const base=String(filename||"").replace(/\.[^.]+$/,"");
+    let m=base.match(/(?:^|\D)(0?[1-9]|1[0-2])[_-](20\d{2})(?:\D|$)/); if(m)return `${m[2]}-${String(+m[1]).padStart(2,"0")}`;
+    m=base.match(/(?:^|\D)(20\d{2})[_-](0?[1-9]|1[0-2])(?:\D|$)/); if(m)return `${m[1]}-${String(+m[2]).padStart(2,"0")}`;
+    return "";
+  }
   async function importBcg(){
     const file=$("bcgFile").files[0];if(!file){toast("Pilih file Excel atau CSV terlebih dahulu.");return;}
     try{
@@ -251,14 +270,23 @@
       // Cari baris header, termasuk format rekap AIPOS yang digunakan Happy Home.
       let headerRowIndex=rows.findIndex((row,i)=>i<15&&row.some(cell=>["barcode","namabarang","totalpenjualanrp","totalqtyterjual"].includes(normalizeHeader(cell))));
       if(headerRowIndex<0)headerRowIndex=0;
-      const headers=rows[headerRowIndex], codeI=findCol(headers,["kode","kodebarang","barcode","code","itemcode","sku"]), nameI=findCol(headers,["nama","namabarang","name","itemname","barang"]), salesI=findCol(headers,["penjualan","totalpenjualan","totalpenjualanrp","totalpenjualanrupiah","omzet","sales","salesamount","total","nilaipenjualan"]), qtyI=findCol(headers,["qty","totalqtyterjual","jumlahterjual","quantity","terjual"]), prevI=findCol(headers,["penjualansebelumnya","penjualanbulanlalu","previoussales","salesprevious","omzetsebelumnya"]), marginI=findCol(headers,["margin","marginpersen","labapersen","profitmargin"]);
+      const headers=rows[headerRowIndex], codeI=findCol(headers,["kode","kodebarang","barcode","code","itemcode","sku"]), nameI=findCol(headers,["nama","namabarang","name","itemname","barang"]), salesI=findCol(headers,["penjualan","totalpenjualan","totalpenjualanrp","totalpenjualanrupiah","omzet","sales","salesamount","total","nilaipenjualan"]), qtyI=findCol(headers,["qty","totalqtyterjual","jumlahterjual","quantity","terjual"]), prevI=findCol(headers,["penjualansebelumnya","penjualanbulanlalu","previoussales","salesprevious","omzetsebelumnya"]), marginI=findCol(headers,["margin","marginpersen","labapersen","profitmargin"]), periodI=findCol(headers,["periode","period","bulan","bulanrekap","tanggalrekap"]);
       if(nameI<0)throw new Error("Kolom NAMA BARANG tidak ditemukan. Periksa baris judul kolom di file Excel.");
       if(salesI<0&&qtyI<0)throw new Error("Kolom TOTAL PENJUALAN (Rp) atau TOTAL QTY TERJUAL tidak ditemukan.");
-      const month=$("bcgPeriod").value||monthNow, imported=[];
       const parseNum=v=>{if(typeof v==="number")return Number.isFinite(v)?v:0;let n=String(v??"").trim().replace(/[^\d,.-]/g,"");if(n.includes(",")&&n.includes(".")){if(n.lastIndexOf(",")>n.lastIndexOf("."))n=n.replace(/\./g,"").replace(",",".");else n=n.replace(/,/g,"");}else if(n.includes(",")){n=n.replace(",",".");}else{n=n.replace(/\.(?=\d{3}(\D|$))/g,"");}return Number(n)||0;};
-      rows.slice(headerRowIndex+1).forEach((row,i)=>{const name=String(row[nameI]||"").trim();if(!name)return;const sales=salesI>=0?parseNum(row[salesI]):0;const units=qtyI>=0?parseNum(row[qtyI]):0;const prev=prevI>=0?parseNum(row[prevI]):0;const rawCode=codeI>=0?String(row[codeI]??"").trim():"";imported.push({id:uid(),period:month,code:rawCode||`IMP-${i+1}`,name,sales,previous:prev,units,previousUnits:0,margin:marginI>=0?parseNum(row[marginI]):0});});
+      const dataRows=rows.slice(headerRowIndex+1).filter(row=>String(row[nameI]||"").trim());
+      const periodCounts=new Map();
+      if(periodI>=0)dataRows.forEach(row=>{const m=parsePeriodValue(row[periodI]);if(m)periodCounts.set(m,(periodCounts.get(m)||0)+1);});
+      const fileMonth=periodFromFilename(file.name);
+      const detectedMonth=[...periodCounts.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]||fileMonth;
+      const month=detectedMonth||$("bcgPeriod").value||monthNow;
+      // Periode dari isi rekap (mis. 09-2026) didahulukan; nama file menjadi cadangan.
+      const imported=[];
+      dataRows.forEach((row,i)=>{const name=String(row[nameI]||"").trim();const sales=salesI>=0?parseNum(row[salesI]):0;const units=qtyI>=0?parseNum(row[qtyI]):0;const prev=prevI>=0?parseNum(row[prevI]):0;const rawCode=codeI>=0?String(row[codeI]??"").trim():"";imported.push({id:uid(),period:month,code:rawCode||`IMP-${i+1}`,name,sales,previous:prev,units,previousUnits:0,margin:marginI>=0?parseNum(row[marginI]):0});});
       if(!imported.length)throw new Error("Tidak ada baris barang yang dapat dibaca.");
-      await replaceBcgMonth(month,imported);toast(`${imported.length} barang berhasil dianalisis untuk ${monthLabel(month)}.`);
+      await replaceBcgMonth(month,imported);
+      $("bcgPeriod").value=month;renderBcg();
+      toast(`${imported.length} barang berhasil diimpor untuk ${monthLabel(month)}${periodI>=0||fileMonth?" (periode terdeteksi otomatis)":""}.`);
     }catch(err){toast(err.message||"Gagal membaca file.");}
   }
   function setEditChat(id){const r=state.chats.find(x=>x.id===id);if(!r)return;$("chatEditId").value=r.id;$("chatDate").value=r.date;$("chatCount").value=r.count;$("chatChannel").value=r.channel||"Semua kanal";$("chatNotes").value=r.notes||"";$("saveChatButton").textContent="Simpan perubahan";$("cancelChatEdit").classList.remove("hidden");window.scrollTo({top:0,behavior:"smooth"});}
