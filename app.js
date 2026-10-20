@@ -79,7 +79,8 @@
       return {...r,growth,contribution};
     });
     // Gunakan titik tengah sebaran data barang, bukan ambang tetap 10%/20% yang membuat hampir semua barang menjadi Dog.
-    const growthCut=median(calculated.filter(r=>r.growth!==null).map(r=>r.growth));
+    // Pertumbuhan tinggi harus benar-benar positif dan minimal 20%; median saja bisa negatif jika mayoritas barang turun.
+    const growthCut=Math.max(20, median(calculated.filter(r=>r.growth!==null).map(r=>r.growth)));
     const shareCut=median(calculated.map(r=>r.contribution));
     return calculated.map(r=>{
       if(r.growth===null)return {...r,category:"Perlu pembanding"};
@@ -145,7 +146,7 @@
     if(!selectedBcgCategory){$("bcgTableTitle").textContent="Hasil klasifikasi";$("bcgTableMeta").textContent=`${all.length} barang dianalisis · ${monthLabel(m)}. Pilih kategori untuk melihat daftar.`;table.innerHTML='<tr><td colspan="7" class="empty-cell">Pilih kartu Star, Cash Cow, Question Mark, atau Dog untuk melihat barang dalam kategori tersebut.</td></tr>';return;}
     const categoryRows=all.filter(r=>r.category===selectedBcgCategory);const rows=categoryRows.filter(r=>(r.name+" "+r.code).toLowerCase().includes(search));
     $("bcgTableTitle").textContent=selectedBcgCategory;$("bcgTableMeta").textContent=`${rows.length} dari ${categoryRows.length} barang · ${monthLabel(m)} · berdasarkan ${$("bcgMetric")?.value==="units"?"unit terjual":"omzet"}`;
-    table.innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.code)}</td><td><strong>${esc(r.name)}</strong></td><td>${fmtRp(r.sales)}</td><td>${fmtNum(r.units||0)}</td><td>${(r.growth===null?"—":Number(r.growth).toFixed(1))}%</td><td>${Number(r.contribution).toFixed(1)}%</td><td><span class="tag ${r.category.toLowerCase().replace(" ","-")}">${esc(r.category)}</span></td></tr>`).join(""):'<tr><td colspan="7" class="empty-cell">Tidak ada barang yang cocok di kategori ini.</td></tr>';
+    table.innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.code)}</td><td><strong>${esc(r.name)}</strong></td><td>${fmtRp(r.sales)}</td><td>${fmtNum(r.units||0)}</td><td>${(r.growth===null?"—":Number(r.growth).toFixed(1))}%</td><td>${Number(r.contribution).toFixed(3)}%</td><td><span class="tag ${r.category.toLowerCase().replace(" ","-")}">${esc(r.category)}</span></td></tr>`).join(""):'<tr><td colspan="7" class="empty-cell">Tidak ada barang yang cocok di kategori ini.</td></tr>';
   }
   function renderChat(){
     const m=$("chatMonth").value||monthNow, allRows=monthRows(state.chats,m).sort((a,b)=>b.date.localeCompare(a.date));
